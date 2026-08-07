@@ -26,19 +26,20 @@ class BaseAgent:
 
     def __init__(self, prompt_manager: PromptManager):
         self.prompts = prompt_manager
-        api_key = os.environ.get("DEEPSEEK_API_KEY", "")
-        self.client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+        from llm_config import get_llm_config, make_openai_client
+        self.llm_cfg = get_llm_config()
+        self.client = make_openai_client()
 
-    def _call_llm(self, system: str, user: str, model: str = "deepseek-chat") -> str:
+    def _call_llm(self, system: str, user: str, model: str = "") -> str:
         try:
             response = self.client.chat.completions.create(
-                model=model,
+                model=model or self.llm_cfg["model"],
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
                 ],
-                temperature=0.0,
-                max_tokens=1024,
+                temperature=self.llm_cfg["temperature"],
+                max_tokens=self.llm_cfg["max_tokens"],
             )
             return response.choices[0].message.content or ""
         except Exception as e:

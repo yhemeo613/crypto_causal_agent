@@ -50,7 +50,8 @@ class FitnessEvaluator:
         std_val = np.std(values)
         penalty = std_val / (abs(mean_val) + 1e-9)
         fitness = mean_val * (1.0 - self.w * min(penalty, 1.0))
-        return max(fitness, 0.0)
+        # 保留原始值（负收益真实展示）；engine 排序自然把负值排后，选择安全
+        return fitness
 
 
 class EvolutionEngine:
@@ -68,41 +69,39 @@ class EvolutionEngine:
 
     def __init__(
         self,
-        population_size: int = 12,
-        generations: int = 30,
-        crossover_rate: float = 0.7,
-        mutation_rate: float = 0.2,
-        tournament_size: int = 3,
-        elitism_count: int = 2,
-        generalization_weight: float = 0.3,
+        population_size: Optional[int] = None,
+        generations: Optional[int] = None,
+        crossover_rate: Optional[float] = None,
+        mutation_rate: Optional[float] = None,
+        tournament_size: Optional[int] = None,
+        elitism_count: Optional[int] = None,
+        generalization_weight: Optional[float] = None,
     ):
-        self.pop_size = population_size
-        self.generations = generations
-        self.crossover_rate = crossover_rate
-        self.mutation_rate = mutation_rate
-        self.tournament_size = tournament_size
-        self.elitism_count = elitism_count
+        # 未显式传参时读 config evolution 段（消除双份维护）
+        from config_utils import get_section
+        ev = get_section("evolution")
+        self.pop_size = population_size if population_size is not None else int(ev.get("population_size", 12))
+        self.generations = generations if generations is not None else int(ev.get("generations", 30))
+        self.crossover_rate = crossover_rate if crossover_rate is not None else float(ev.get("crossover_rate", 0.7))
+        self.mutation_rate = mutation_rate if mutation_rate is not None else float(ev.get("mutation_rate", 0.2))
+        self.tournament_size = tournament_size if tournament_size is not None else int(ev.get("tournament_size", 3))
+        self.elitism_count = elitism_count if elitism_count is not None else int(ev.get("elitism_count", 2))
+        self.generalization_weight = generalization_weight if generalization_weight is not None else float(ev.get("generalization_penalty_weight", 0.3))
 
         self.crossover = GeneCrossover()
         self.mutator = GeneMutator()
-        self.evaluator = FitnessEvaluator(generalization_weight)
+        self.evaluator = FitnessEvaluator(self.generalization_weight)
 
         self.population: list[StrategyGene] = []
         self.best_gene: Optional[StrategyGene] = None
         self.history: list[dict] = []
 
     def init_population(self, logic_code: str = DEFAULT_STRATEGY_CODE) -> list[StrategyGene]:
-        """生成初始种群，参数随机"""
+        """生成初始种群，参数从 PARAM_SPACE 随机采样（单一来源）"""
+        from l7_evolution.gene_encoder import random_params
         self.population = []
         for i in range(self.pop_size):
-            params = {
-                "ma_short_window": random.randint(5, 50),
-                "ma_long_window": random.randint(20, 200),
-                "vol_threshold": random.uniform(0.3, 1.5),
-                "vol_boost": random.uniform(1.0, 3.0),
-                "rsi_oversold": random.randint(20, 35),
-                "rsi_overbought": random.randint(65, 80),
-            }
+            params = random_params()
             self.population.append(StrategyGene(
                 id=f"gen0_{i}", logic_code=logic_code,
                 params=params, generation=0,

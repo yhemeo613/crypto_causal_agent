@@ -65,18 +65,18 @@ def test_load_and_switch():
     make_test_kline()
     registry = EnvironmentRegistry()
 
-    # 加载牛市
+    # 加载牛市槽位（regime 数据驱动，不再写死）
     bull = registry.load("bull", interval="1h")
     assert bull.name == "bull"
     assert not bull.data.empty
-    assert bull.regime == "trend_up"
+    assert bull.regime == registry.classify_regime(bull.data)
     bull_count = registry.get_bar_count()
-    print(f"  [OK] 牛市: {bull_count} bars, regime={bull.regime}")
+    print(f"  [OK] 牛市槽位: {bull_count} bars, regime={bull.regime}（数据驱动）")
 
     # 切换到熊市（旧数据应清除）
     bear = registry.load("bear", interval="1h")
     assert bear.name == "bear"
-    assert bear.regime == "trend_down"
+    assert bear.regime == registry.classify_regime(bear.data)
     bear_count = registry.get_bar_count()
     assert bear_count != bull_count, "不同环境应有不同数据量"
     print(f"  [OK] 熊市: {bear_count} bars, regime={bear.regime}")
@@ -103,7 +103,7 @@ def test_iter_bars():
     assert "l" in bar
     assert "c" in bar
     assert "v" in bar
-    assert bar["regime"] == "range"
+    assert bar["regime"] == registry.classify_regime(env.data)  # 数据驱动
     print(f"  [OK] 遍历 {len(bars)} bars, 首bar: o={bar['o']:.0f} c={bar['c']:.0f} regime={bar['regime']}")
 
 

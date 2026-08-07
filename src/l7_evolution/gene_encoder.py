@@ -23,6 +23,35 @@ class StrategyGene:
     env_performances: dict = field(default_factory=dict)
 
 
+# ═══════════════════════════════════════════════════════════════
+# 参数空间单一来源（evolution / auto_hpo / meta_learner 共用）
+# ═══════════════════════════════════════════════════════════════
+
+PARAM_SPACE: dict[str, dict] = {
+    "ma_short_window": {"kind": "int", "min": 5, "max": 50, "default": 20},
+    "ma_long_window": {"kind": "int", "min": 20, "max": 200, "default": 60},
+    "vol_threshold": {"kind": "float", "min": 0.3, "max": 1.5, "default": 1.0},
+    "vol_boost": {"kind": "float", "min": 1.0, "max": 3.0, "default": 1.5},
+    "rsi_oversold": {"kind": "int", "min": 20, "max": 35, "default": 30},
+    "rsi_overbought": {"kind": "int", "min": 65, "max": 80, "default": 70},
+}
+
+PARAM_ORDER: list[str] = list(PARAM_SPACE.keys())
+
+
+def random_params(rng=None) -> dict:
+    """按参数空间随机采样（供初始化种群使用）"""
+    import random as _random
+    rng = rng or _random
+    out = {}
+    for name, spec in PARAM_SPACE.items():
+        if spec["kind"] == "int":
+            out[name] = rng.randint(spec["min"], spec["max"])
+        else:
+            out[name] = rng.uniform(spec["min"], spec["max"])
+    return out
+
+
 class GeneEncoder:
     """基因编解码器：策略源码 ↔ AST ↔ 可交叉变异"""
 

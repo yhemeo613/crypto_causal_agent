@@ -144,7 +144,8 @@ def cmd_download(args) -> int:
     """下载历史数据"""
     import logging
     from l1_env_base.data_collector import (
-        MultiExchangeCollector, FREDCollector, CoinGeckoMacroCollector, validate_all
+        MultiExchangeCollector, FREDCollector, CoinGeckoMacroCollector,
+        FearGreedCollector, validate_all
     )
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -220,6 +221,14 @@ def cmd_download(args) -> int:
     except Exception as e:
         print(f"  [WARN] CoinGecko: {e}")
 
+    # 免费情绪指标（Fear&Greed，替代收费的 Glassnode）
+    print("\n[2.5] 免费情绪指标（Fear&Greed，无需 Key）...")
+    try:
+        fg = FearGreedCollector(data_dir="./data/raw")
+        fg.download_all()
+    except Exception as e:
+        print(f"  [WARN] Fear&Greed: {e}")
+
     # ─── 校验 ──────────────────────────────────
     print()
     validate_all()
@@ -257,8 +266,42 @@ def cmd_backtest(args) -> int:
 
 
 def cmd_evolve(args) -> int:
-    """运行进化实验"""
-    print("进化实验功能将在 P0-14 实现")
+    """运行真实进化实验：四环境回测评估 + 遗传进化"""
+    sys.path.insert(0, str(Path(__file__).parent / "src"))
+    sys.path.insert(0, str(Path(__file__).parent / "dashboard"))
+    from l7_evolution.evolution_engine import EvolutionEngine
+    import server as _srv  # 复用真实回测
+
+    engine = EvolutionEngine(
+        population_size=args.population,
+        generations=args.generations,
+        generalization_weight=0.3,
+    )
+    engine.init_population()
+
+    def env_perf_func(gene):
+        return _srv.backtest_gene(gene, envs=("bull", "bear", "range", "extreme"))
+
+    best = engine.run(env_perf_func)
+    print(f"[OK] 进化完成: {args.generations} 代 × {args.population} 个体")
+    print(f"  best fitness: {best.fitness:.4f}")
+    print(f"  best params: {best.params}")
+    print(f"  各环境绩效: {best.env_performances}")
+    return 0
+
+
+def cmd_export(args) -> int:
+    """导出实验数据（CSV/JSON/Pickle，pandas 可加载）"""
+    sys.path.insert(0, str(Path(__file__).parent / "src"))
+    from experiment_exporter import export_all
+    from datetime import datetime as _dt
+    out = args.out or str(Path(__file__).parent / "data" / "experiments" /
+                          _dt.now().strftime("%Y%m%d_%H%M%S"))
+    r = export_all(out, formats=tuple(args.format))
+    print(f"[OK] 导出完成 → {r['out_dir']}")
+    for f in r["files"]:
+        print(f"  {f}")
+    print(f"  记录数: {r['records']}")
     return 0
 
 
@@ -291,9 +334,16 @@ def main():
     # evolve
     p_ev = sub.add_parser("evolve", help="运行进化实验")
     p_ev.add_argument("--config", default="config/config.yaml")
-    p_ev.add_argument("--generations", type=int, default=30)
+    p_ev.add_argument("--generations", type=int, default=3)
+    p_ev.add_argument("--population", type=int, default=4)
     p_ev.add_argument("--resume", type=int, default=0, help="从第 N 代断点恢复")
     p_ev.set_defaults(func=cmd_evolve)
+
+    # export
+    p_ex = sub.add_parser("export", help="导出实验数据 (CSV/JSON/Pickle)")
+    p_ex.add_argument("--out", default="", help="输出目录")
+    p_ex.add_argument("--format", nargs="+", default=["csv", "json", "pickle"])
+    p_ex.set_defaults(func=cmd_export)
 
     args = parser.parse_args()
 

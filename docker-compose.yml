@@ -24,6 +24,7 @@ services:
       - "7687:7687"
     volumes:
       - neo4jdata:/data
+      - neo4jlogs:/logs
     healthcheck:
       test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "${NEO4J_PASSWORD:-neo4j123}", "RETURN 1"]
       interval: 5s
@@ -33,6 +34,8 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    volumes:
+      - redisdata:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -41,3 +44,5 @@ services:
 volumes:
   tsdata:
   neo4jdata:
+  neo4jlogs:
+  redisdata:

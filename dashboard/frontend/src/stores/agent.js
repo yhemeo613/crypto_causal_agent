@@ -1,35 +1,61 @@
 import { defineStore } from 'pinia'
-import axios from 'axios'
+import api from '../api'
 
 export const useAgentStore = defineStore('agent', {
   state: () => ({
-    state: null,
+    state: null,           // /api/agent/status -> state
+    dbStats: null,         // /api/db -> db
     architecture: null,
-    dbStats: null,
+    regime: null,          // 当前市场 Regime（感知切片）
     connected: false,
     lastUpdate: null,
+    wsConnected: false,
+    alerts: [],
     polling: null,
   }),
+  getters: {
+    agentStatus: (s) => s.state?.status || 'idle',
+    recentDecisions: (s) => s.state?.recent_decisions || [],
+  },
   actions: {
-    async fetchState() {
+    async fetchAgentStatus() {
       try {
-        const { data } = await axios.get('/api/state')
+        const { data } = await api.agentStatus()
         this.state = data.state
         this.connected = true
         this.lastUpdate = data.ts
       } catch { this.connected = false }
     },
-    async fetchArchitecture() { try { const { data } = await axios.get('/api/architecture'); this.architecture = data } catch {} },
-    async fetchDbStats() { try { const { data } = await axios.get('/api/db'); this.dbStats = data.db } catch {} },
-    startPolling(interval = 3000) {
-      this.fetchState()
+    async fetchDb() { try { const { data } = await api.db(); this.dbStats = data.db } catch {} },
+    async fetchRegime() {
+      try {
+        const { data } = await api.perceptionSlices()
+        this.regime = data.perception?.regime || null
+      } catch {}
+    },
+    async fetchArchitecture() { try { const { data } = await api.architecture(); this.architecture = data } catch {} },
+    pushAlert(level, title, detail) {
+      this.alerts.unshift({ level, title, detail, ts: new Date().toISOString() })
+      if (this.alerts.length > 30) this.alerts.pop()
+    },
+    async startPause() {
+      if (this.agentStatus === 'running') await api.agentPause()
+      else if (this.agentStatus === 'paused') await api.agentResume()
+      else await api.agentStart()
+      await this.fetchAgentStatus()
+    },
+    async step() { await api.agentStatus() },
+    startPolling(interval = 4000) {
+      this.fetchAgentStatus()
+      this.fetchDb()
       this.fetchArchitecture()
-      this.fetchDbStats()
+      this.fetchRegime()
       this.polling = setInterval(() => {
-        this.fetchState()
-        this.fetchDbStats()
+        this.fetchAgentStatus()
+        this.fetchDb()
+        this.fetchRegime()
       }, interval)
     },
-    stopPolling() { if (this.polling) { clearInterval(this.polling); this.polling = null } }
-  }
+    stopPolling() { if (this.polling) { clearInterval(this.polling); this.polling = null } },
+  },
 })

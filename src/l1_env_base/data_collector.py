@@ -126,7 +126,7 @@ class MultiExchangeCollector:
                 exchange.fetch_time()
                 self._connections[name] = exchange
                 self._available.add(name)
-                logger.info(f"  [OK] {name} 可用")
+                logger.debug(f"  [OK] {name} 可用")
             except Exception as e:
                 self._unavailable.add(name)
                 logger.warning(f"  [--] {name} 不可用: {e}")
@@ -135,7 +135,7 @@ class MultiExchangeCollector:
             raise RuntimeError(
                 f"所有交易所均不可用 ({self.exchanges})，请检查代理或网络"
             )
-        logger.info(f"可用交易所: {sorted(self._available)}")
+        logger.debug(f"可用交易所: {sorted(self._available)}")
 
     def _create_exchange(self, name: str):
         """创建 ccxt 交易所实例"""
@@ -223,11 +223,11 @@ class MultiExchangeCollector:
                     logger.warning(f"限流，等待 {wait}s ({consecutive_errors}/5)")
                 else:
                     wait = 5
-                    logger.error(f"下载失败: {e}")
+                    logger.warning(f"下载失败: {e}")
                 time.sleep(wait)
 
                 if consecutive_errors >= 5:
-                    logger.error(f"连续失败，终止。已获取 {len(all_candles)} 条")
+                    logger.warning(f"连续失败，终止。已获取 {len(all_candles)} 条")
                     break
                 continue
 
@@ -255,6 +255,79 @@ class MultiExchangeCollector:
 
         df.to_parquet(output_path, index=False)
         logger.info(f"  [OK] {len(df):,} 条 → {output_path}")
+        return df
+
+    # ─── K 线增量下载（实时更新） ──────────────────────────
+
+    def download_klines_incremental(
+        self,
+        symbol: str = "BTCUSDT",
+        interval: str = "1h",
+        since: Optional[str] = None,
+        exchange: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        增量下载 K 线：从 since（默认最近 7 天）拉取到当前时间。
+        返回新 K 线 DataFrame（由调用方负责写入数据库/parquet）。
+        """
+        end = datetime.now().strftime("%Y-%m-%d")
+        if since is None:
+            since = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+
+        if exchange and exchange in self._available:
+            ex = self._get_exchange(exchange)
+            ex_name = exchange
+        else:
+            ex_name = next(iter(self._available))
+            ex = self._connections[ex_name]
+
+        ccxt_symbol = self._to_ccxt_symbol(symbol, ex_name)
+        logger.info(f"增量下载 K线 [{ex_name}]: {ccxt_symbol} {interval} {since} → {end}")
+
+        since_ms = ex.parse8601(f"{since}T00:00:00Z")
+        end_ms = ex.parse8601(f"{end}T23:59:59Z")
+
+        all_candles = []
+        current_since = since_ms
+        consecutive_errors = 0
+
+        while current_since < end_ms:
+            try:
+                candles = ex.fetch_ohlcv(
+                    ccxt_symbol, timeframe=interval,
+                    since=current_since, limit=1000,
+                )
+                consecutive_errors = 0
+            except Exception as e:
+                consecutive_errors += 1
+                if self._is_rate_limited(e):
+                    logger.warning(f"限流，等待 30s ({consecutive_errors}/5)")
+                    time.sleep(30)
+                else:
+                    logger.warning(f"增量下载失败: {e}")
+                    time.sleep(5)
+                if consecutive_errors >= 5:
+                    logger.warning(f"连续失败，终止。已获取 {len(all_candles)} 条")
+                    break
+                continue
+
+            if not candles:
+                break
+            all_candles.extend(candles)
+            current_since = candles[-1][0] + 1
+            time.sleep(0.03)
+
+        if not all_candles:
+            logger.info(f"  增量: 无新数据 ({symbol} {interval})")
+            return pd.DataFrame()
+
+        df = pd.DataFrame(
+            all_candles,
+            columns=["ts", "open", "high", "low", "close", "volume"],
+        )
+        df["ts"] = pd.to_datetime(df["ts"], unit="ms", utc=True)
+        df = df.drop_duplicates(subset="ts").sort_values("ts").reset_index(drop=True)
+        logger.info(f"  [OK] 增量 {len(df):,} 条 ({symbol} {interval})")
         return df
 
     # ─── 资金费率 ──────────────────────────────────────────
@@ -519,6 +592,146 @@ class CoinGeckoMacroCollector:
             logger.info(f"  Global MCap: ${global_data['total_mcap']/1e12:.2f}T  "
                        f"BTC: {global_data['btc_dominance']:.1f}%")
         results["btc_history"] = self.download_btc_history(days=365)
+        return results
+
+
+class FearGreedCollector:
+    """
+    免费情绪指标采集器（P0-02 免费替代方案）：Alternative.me Crypto Fear & Greed Index。
+
+    - 完全免费，无需 API Key
+    - 恐慌贪婪指数（0-100）：市场情绪，替代 Glassnode 链上情绪维度
+    - 附带 BTC 历史价格（用于后续 MVRV 等近似计算）
+    """
+
+    FNG_URL = "https://api.alternative.me/fng/"
+    PRICE_URL = "https://api.coingecko.com/api/v3/coins/bitcoin/market_chart"
+    NAME = "fear_greed"
+
+    def __init__(self, data_dir: str = "./data/raw"):
+        self.data_dir = Path(data_dir)
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+
+    def download_fng(self, limit: int = 730) -> pd.DataFrame:
+        """恐惧贪婪指数（免费）"""
+        import requests
+        r = requests.get(self.FNG_URL, params={"limit": limit, "format": "json"},
+                         timeout=20)
+        r.raise_for_status()
+        payload = r.json()
+        rows = []
+        for d in payload.get("data", []):
+            try:
+                rows.append({
+                    "ts": pd.Timestamp(int(d["timestamp"]), unit="s", tz="UTC"),
+                    "value": float(d["value"]),
+                    "classification": d.get("value_classification", ""),
+                })
+            except Exception:
+                continue
+        df = pd.DataFrame(rows)
+        if not df.empty:
+            df = df.drop_duplicates(subset="ts").sort_values("ts").reset_index(drop=True)
+        return df
+
+    def download_all(self, start: str = "2024-01-01", end: str = "2026-06-30") -> dict:
+        """下载 FNG 情绪指数 + BTC 价格，写 parquet"""
+        out = {}
+        # 1. 恐惧贪婪指数
+        try:
+            df = self.download_fng()
+            if not df.empty:
+                f = self.data_dir / f"fear_greed.parquet"
+                df.to_parquet(f)
+                logger.info(f"  [OK] Fear&Greed: {len(df)} 行 → {f.name}")
+                out["fear_greed"] = df
+        except Exception as e:
+            logger.warning(f"Fear&Greed 采集失败: {e}")
+        return out
+
+
+class GlassnodeCollector:
+    """
+    采集 Glassnode 链上数据（P0-02，可选）。
+
+    注意：Glassnode 高级指标为收费服务（studio.glassnode.com）。
+    未配置 GLASSNODE_API_KEY 时不再阻断流程——项目默认使用免费替代：
+    FearGreedCollector（Alternative.me 恐慌贪婪指数，无需 Key）。
+    若配置了 Key，则继续采集链上指标。
+    """
+
+    BASE_URL = "https://api.glassnode.com/v1/metrics"
+
+    # 指标路径：地址活跃度 / 转账量 / 矿工净头寸变化
+    METRICS = {
+        "active_addresses": "addresses/active_count",
+        "transfer_volume": "transactions/transfers_volume_sum",
+        "miner_netflow": "miners/flow_net",
+    }
+
+    def __init__(self, data_dir: str = "./data/raw"):
+        self.data_dir = Path(data_dir)
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            from dotenv import load_dotenv
+            env_path = Path(__file__).parent.parent.parent / ".env"
+            if env_path.exists():
+                load_dotenv(env_path)
+        except ImportError:
+            pass
+
+        api_key = os.environ.get("GLASSNODE_API_KEY", "")
+        if not api_key:
+            cfg = _load_config()
+            api_key = (cfg.get("data", {}).get("glassnode", {}).get("api_key", "") or "").strip()
+            if api_key.startswith("${"):
+                api_key = os.environ.get(api_key.strip("${}"), "")
+        if not api_key:
+            # 未配置：不再阻断——项目默认免费替代（FearGreedCollector）
+            self.api_key = ""
+            logger.warning(
+                "GLASSNODE_API_KEY 未配置：Glassnode 为收费服务，跳过链上指标采集；"
+                "免费替代已启用：Fear&Greed 恐慌贪婪指数（无需 Key）")
+            return
+        self.api_key = api_key
+
+    def collect_metric(self, name: str, symbol: str = "BTC",
+                       start: str = "2024-01-01", end: str = "2026-06-30",
+                       interval: str = "1d") -> "pd.DataFrame":
+        """采集单个链上指标"""
+        import requests
+
+        path = self.METRICS.get(name)
+        if path is None:
+            raise ValueError(f"未知指标: {name}, 可选 {list(self.METRICS)}")
+        url = (f"{self.BASE_URL}/{path}?a={symbol}&i={interval}"
+               f"&s={start}&u={end}&api_key={self.api_key}")
+        try:
+            r = requests.get(url, timeout=30)
+            r.raise_for_status()
+            data = r.json()
+            import pandas as pd
+            df = pd.DataFrame(data)
+            if df.empty:
+                logger.warning(f"  [--] Glassnode {name}: 空数据")
+                return df
+            df["ts"] = pd.to_datetime(df["t"], unit="s", utc=True)
+            df = df.drop(columns=["t"]).rename(columns={"v": name})
+            df = df[["ts", name]]
+            out = self.data_dir / f"glassnode_{name}.parquet"
+            df.to_parquet(out, index=False)
+            logger.info(f"  [OK] Glassnode {name}: {len(df)} 行 → {out.name}")
+            return df
+        except Exception as e:
+            logger.error(f"Glassnode {name} 采集失败: {e}")
+            return pd.DataFrame()
+
+    def download_all(self, start: str = "2024-01-01", end: str = "2026-06-30") -> dict:
+        """采集全部链上指标"""
+        results = {}
+        for name in self.METRICS:
+            results[name] = self.collect_metric(name, start=start, end=end)
         return results
 
 

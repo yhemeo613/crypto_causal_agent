@@ -140,7 +140,9 @@ class LLMCausalExtractor:
 3. 只输出 JSON 数组"""
 
     def __init__(self):
-        self.api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+        from llm_config import get_llm_config
+        self.llm_cfg = get_llm_config()
+        self.api_key = self.llm_cfg["api_key"]
         self.available = bool(self.api_key and len(self.api_key) > 20)
 
     def extract(self, perception_context: dict, max_triplets: int = 5) -> list[CausalTriplet]:
@@ -149,19 +151,19 @@ class LLMCausalExtractor:
             return []
 
         from openai import OpenAI
-        client = OpenAI(api_key=self.api_key, base_url="https://api.deepseek.com")
+        client = OpenAI(api_key=self.api_key, base_url=self.llm_cfg["api_base"])
         ctx_text = self._format_context(perception_context)
 
         try:
             response = client.chat.completions.create(
-                model="deepseek-chat",
+                model=self.llm_cfg["model"],
                 messages=[
                     {"role": "system", "content": self.SYSTEM_PROMPT},
                     {"role": "user",
                      "content": f"分析以下市场数据中的因果关系，输出最多 {max_triplets} 条：\n\n{ctx_text}"},
                 ],
-                temperature=0.0,
-                max_tokens=1024,
+                temperature=self.llm_cfg["temperature"],
+                max_tokens=self.llm_cfg["max_tokens"],
             )
             raw = response.choices[0].message.content.strip()
             if "```json" in raw:

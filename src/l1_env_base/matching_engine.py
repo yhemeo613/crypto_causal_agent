@@ -64,13 +64,15 @@ class SlippageModel:
 
     def __init__(
         self,
-        model: str = "linear",
-        base_slippage: float = 0.0001,   # 基础滑点 0.01%
-        volume_factor: float = 0.1,       # 成交量占比影响系数
+        model: Optional[str] = None,
+        base_slippage: Optional[float] = None,   # 基础滑点
+        volume_factor: Optional[float] = None,   # 成交量占比影响系数
     ):
-        self.model = model
-        self.base_slippage = base_slippage
-        self.volume_factor = volume_factor
+        from config_utils import get_section
+        mc = get_section("matching")
+        self.model = model or mc.get("slippage_model", "linear")
+        self.base_slippage = base_slippage if base_slippage is not None else float(mc.get("slippage_base", 0.0001))
+        self.volume_factor = volume_factor if volume_factor is not None else 0.1
 
     def compute(self, order_size_usd: float, bar_volume_usd: float) -> float:
         """
@@ -106,10 +108,12 @@ class MatchingEngine:
 
     def __init__(
         self,
-        commission: float = 0.0004,          # 手续费 0.04%
+        commission: Optional[float] = None,   # 手续费（config matching.commission 优先）
         slippage_model: Optional[SlippageModel] = None,
     ):
-        self.commission = commission
+        from config_utils import get_section
+        mc = get_section("matching")
+        self.commission = commission if commission is not None else float(mc.get("commission", 0.0004))
         self.slippage = slippage_model or SlippageModel()
 
     # ─── 市价单撮合 ──────────────────────────────────────

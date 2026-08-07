@@ -20,6 +20,7 @@ class PerceptionContext(BaseModel):
     l1_micro: Optional[dict] = None
     l2_meso: Optional[dict] = None
     l3_macro: Optional[dict] = None
+    anomalies: list = Field(default_factory=list)   # P1-13 异常事件（闪崩/波动尖峰/费率极端）
 
 
 # ─── 记忆召回 ──────────────────────────────────────────
@@ -66,8 +67,8 @@ class DecisionResult(BaseModel):
     confidence: float = 0.0
     position_size_pct: float = 0.0
     leverage: float = 1.0
-    stop_loss: float = 0.0
-    take_profit: float = 0.0
+    stop_loss: Optional[float] = 0.0
+    take_profit: Optional[float] = 0.0
     reasoning: str = ""
 
 

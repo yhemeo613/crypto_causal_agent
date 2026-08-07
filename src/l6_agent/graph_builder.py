@@ -20,14 +20,36 @@ from .agents.debate_agents import (
 logger = logging.getLogger(__name__)
 
 
-def build_decision_graph() -> StateGraph:
+class ParallelDebateNode:
+    """P2-02 并行辩论节点：bull + bear 两 Agent 同时执行，延迟减半"""
+
+    def __init__(self, bull, bear):
+        self.bull = bull
+        self.bear = bear
+
+    def __call__(self, state):
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=2) as ex:
+            f1 = ex.submit(self.bull.__call__, state)
+            f2 = ex.submit(self.bear.__call__, state)
+            rb, rb2 = f1.result(), f2.result()
+        out = {}
+        out.update(rb or {})
+        out.update(rb2 or {})
+        return out
+
+
+def build_decision_graph(skip: set[str] | None = None) -> StateGraph:
     """
     构建 LangGraph 决策流程。
 
     节点流转：
     bull_debate → bear_debate → falsify → counterfactual → decide → END
-    """
 
+    Args:
+        skip: 要跳过的节点名集合（P1-09 消融：真实跳过该 LLM 节点）
+    """
+    skip = skip or set()
     prompts = PromptManager()
     bull = BullDebaterAgent(prompts)
     bear = BearDebaterAgent(prompts)
@@ -37,22 +59,26 @@ def build_decision_graph() -> StateGraph:
 
     graph = StateGraph(AgentState)
 
-    # 添加节点
-    graph.add_node("bull_debate", bull)
-    graph.add_node("bear_debate", bear)
-    graph.add_node("falsify", falsifier)
-    graph.add_node("counterfactual", counterfactual)
-    graph.add_node("decide", sizer)
+    # 添加节点（节点名避免与状态键同名，langgraph ≥0.1.10 禁止同名）
+    # P2-02：bull + bear 合并为并行节点（延迟减半）；skip="debate" 时跳过
+    nodes = [
+        ("parallel_debate", ParallelDebateNode(bull, bear)),
+        ("falsify", falsifier),
+        ("counterfactual_analysis", counterfactual),
+        ("decide", sizer),
+    ]
+    for name, agent in nodes:
+        if name not in skip:
+            graph.add_node(name, agent)
 
-    # 设置入口
-    graph.set_entry_point("bull_debate")
-
-    # 线性流转
-    graph.add_edge("bull_debate", "bear_debate")
-    graph.add_edge("bear_debate", "falsify")
-    graph.add_edge("falsify", "counterfactual")
-    graph.add_edge("counterfactual", "decide")
-    graph.add_edge("decide", END)
+    # 线性流转（跳过被消融的节点，前驱直连后继）
+    chain = [name for name, _ in nodes if name not in skip]
+    if not chain:
+        chain = ["decide"]
+    graph.set_entry_point(chain[0])
+    for i in range(len(chain) - 1):
+        graph.add_edge(chain[i], chain[i + 1])
+    graph.add_edge(chain[-1], END)
 
     return graph
 
@@ -62,8 +88,8 @@ class DecisionPipeline:
     一键式决策管道：感知 → 记忆 → 辩论 → 证伪 → 反事实 → 决策
     """
 
-    def __init__(self):
-        self.graph = build_decision_graph()
+    def __init__(self, skip_nodes: set[str] | None = None):
+        self.graph = build_decision_graph(skip=skip_nodes)
         self.app = self.graph.compile()
 
     def run(

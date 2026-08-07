@@ -39,19 +39,22 @@ class RiskController:
 
     def __init__(
         self,
-        max_drawdown_pct: float = 0.30,
-        max_loss_per_trade_pct: float = 0.05,
-        max_leverage: float = 5.0,
-        max_position_pct: float = 0.95,
-        max_daily_trades: int = 20,
-        min_confidence: float = 0.4,
+        max_drawdown_pct: Optional[float] = None,
+        max_loss_per_trade_pct: Optional[float] = None,
+        max_leverage: Optional[float] = None,
+        max_position_pct: Optional[float] = None,
+        max_daily_trades: Optional[int] = None,
+        min_confidence: Optional[float] = None,
     ):
-        self.max_drawdown_pct = max_drawdown_pct
-        self.max_loss_per_trade_pct = max_loss_per_trade_pct
-        self.max_leverage = max_leverage
-        self.max_position_pct = max_position_pct
-        self.max_daily_trades = max_daily_trades
-        self.min_confidence = min_confidence
+        # 未显式传参时从 config 读取（消除双份维护）
+        from config_utils import get_section
+        rc = get_section("risk_control")
+        self.max_drawdown_pct = max_drawdown_pct if max_drawdown_pct is not None else float(rc.get("max_drawdown_pct", 0.30))
+        self.max_loss_per_trade_pct = max_loss_per_trade_pct if max_loss_per_trade_pct is not None else float(rc.get("max_loss_per_trade_pct", 0.05))
+        self.max_leverage = max_leverage if max_leverage is not None else float(rc.get("max_leverage", 5.0))
+        self.max_position_pct = max_position_pct if max_position_pct is not None else float(rc.get("max_position_pct", 0.95))
+        self.max_daily_trades = max_daily_trades if max_daily_trades is not None else int(rc.get("max_daily_trades", 20))
+        self.min_confidence = min_confidence if min_confidence is not None else float(rc.get("min_confidence_threshold", 0.4))
 
         self.total_rejects: int = 0
         self.reject_log: list[dict] = []

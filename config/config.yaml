@@ -27,6 +27,13 @@ database:
     user: postgres
     password: ${PG_PASSWORD}
     pool_size: 10
+  timescaledb:
+    host: localhost
+    port: 5433
+    dbname: crypto_agent
+    user: postgres
+    password: ${PG_PASSWORD}
+    pool_size: 5
   neo4j:
     uri: bolt://localhost:7687
     user: neo4j
@@ -51,9 +58,15 @@ data:
     start_date: "2024-01-01"
     end_date: "2026-06-30"
     data_dir: ./data/raw
+  # Glassnode 链上指标：收费服务（studio.glassnode.com），可选；未配置 Key 时自动跳过
+  # 免费替代已内置：fear_greed（Alternative.me 恐慌贪婪指数，无需 Key）
   glassnode:
     api_key: ${GLASSNODE_API_KEY}
-    metrics: [sopr, mvrv, puell]
+    enabled: false
+    metrics: [active_addresses, transfer_volume, miner_netflow]
+  fear_greed:
+    enabled: true
+    limit: 730
   # CoinGecko 加密市场宏观（免费，无需 API Key）
   coingecko:
     history_days: 365
@@ -83,17 +96,17 @@ risk_control:
 sandbox:
   environments:
     bull:
-      date_range: ["2024-01-01", "2024-03-31"]
-      description: "牛市环境"
+      date_range: ["2024-01-01", "2024-06-30"]
+      description: "牛市环境（6个月）"
     bear:
       date_range: ["2024-04-01", "2024-09-30"]
-      description: "熊市环境"
+      description: "熊市环境（6个月）"
     range:
-      date_range: ["2024-10-01", "2025-01-31"]
-      description: "震荡环境"
+      date_range: ["2024-08-01", "2025-02-03"]
+      description: "震荡环境（6个月，数据截至 2025-02-03）"
     extreme:
-      date_range: ["2024-08-01", "2024-08-31"]
-      description: "极端波动环境"
+      date_range: ["2024-06-01", "2024-11-30"]
+      description: "极端波动环境（6个月，覆盖 2024-08 极端行情）"
 
 # ─── 感知 ───────────────────────────────
 perception:

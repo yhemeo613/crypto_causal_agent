@@ -88,7 +88,7 @@ class FusionRecaller:
         seen = set()
         unique = []
         for item in sorted(items, key=lambda x: x.score, reverse=True):
-            key = f"{item.source}|{item.content[:50]}"
+            key = f"{item.source}|{(item.content or '')[:50]}"  # content 可能为 None，容错
             if key not in seen:
                 seen.add(key)
                 unique.append(item)
@@ -119,7 +119,7 @@ class FusionRecaller:
         results = self.cases.query(scene_text, n_results=5)
         items = []
         for r in results:
-            meta = r.get("metadata", {})
+            meta = r.get("metadata") or {}  # chroma 偶发返回 None metadata，容错
             dist = r.get("distance", 1.0)
             relevance = max(0.0, 1.0 - dist)  # distance 越小越相似
             items.append(RecallItem(

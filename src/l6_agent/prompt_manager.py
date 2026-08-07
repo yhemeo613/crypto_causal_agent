@@ -123,8 +123,11 @@ class PromptManager:
     # ─── 上下文构建 ──────────────────────────────────────
 
     def build_perception_prompt(self, perception: dict) -> str:
-        """将感知上下文格式化为文本"""
+        """将感知上下文格式化为文本（含 regime + 异常事件）"""
         lines = ["=== 当前市场感知 ==="]
+        regime = perception.get("regime") or "unknown"
+        if regime and regime != "unknown":
+            lines.append(f"\n[市场状态 Regime] {regime}  (P1-04: 决策需适配当前 Regime)")
         for level_key, label in [
             ("l1_micro", "L1 微观 (近期)"),
             ("l2_meso", "L2 中期"),
@@ -138,6 +141,13 @@ class PromptManager:
                         lines.append(f"  {k}: {v:.4f}")
                     elif v:
                         lines.append(f"  {k}: {v}")
+        # P1-13 异常事件：注入并提示风险
+        anomalies = perception.get("anomalies") or []
+        if anomalies:
+            lines.append("\n[异常事件告警]")
+            for a in anomalies[:5]:
+                lines.append(f"  ⚠ {a.get('type')} ({a.get('severity')}): {a.get('detail')}")
+            lines.append("  提示：存在异常事件，决策应提高风控权重、降低仓位或观望")
         return "\n".join(lines)
 
     def build_debate_prompt(self, perception: dict, memory: dict) -> str:

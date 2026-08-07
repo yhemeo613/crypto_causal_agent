@@ -24,13 +24,15 @@ class CausalGraphQuery:
     - 邻居事件：与当前行情相关的事件
     """
 
-    def __init__(self, uri: str = "bolt://localhost:7687", user: str = "neo4j", password: str = ""):
-        if not password:
-            load_dotenv()
-            password = os.environ.get("NEO4J_PASSWORD", "neo4j123")
+    def __init__(self, uri: str = "", user: str = "", password: str = ""):
+        # 未显式传参时从 config 读取（统一连接）
+        from db_conn import get_neo4j_driver, neo4j_params
+        p = neo4j_params()
+        uri = uri or p["uri"]
+        user = user or p["user"]
+        password = password or p["password"]
 
-        from neo4j import GraphDatabase
-        self.driver = GraphDatabase.driver(uri, auth=(user, password))
+        self.driver = get_neo4j_driver()
         self.driver.verify_connectivity()
         logger.info("Neo4j connected")
 
@@ -145,6 +147,12 @@ class CausalGraphQuery:
         """清空图谱（仅测试用）"""
         with self.driver.session() as s:
             s.run("MATCH (n) DETACH DELETE n")
+
+    def clear_test_data(self, names: list[str]):
+        """定向删除测试创建的节点及其关系（不清空生产图谱）"""
+        with self.driver.session() as s:
+            for n in names:
+                s.run("MATCH (n:Event {id: $id}) DETACH DELETE n", id=n)
 
     def close(self):
         self.driver.close()

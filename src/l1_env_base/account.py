@@ -109,9 +109,8 @@ class Account:
     def available_margin(self) -> float:
         return self.balance - self.used_margin
 
-    @property
     def equity(self, current_price: Optional[float] = None) -> float:
-        """总权益 = 余额 + 所有未实现盈亏"""
+        """总权益 = 余额 + 所有未实现盈亏（普通方法，可传当前价格）"""
         upnl = 0.0
         if current_price is not None:
             for p in self.positions.values():

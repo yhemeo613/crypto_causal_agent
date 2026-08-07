@@ -70,8 +70,8 @@ def test_causal_graph():
     assert len(top) > 0, f"应有因果三元组, 实际{len(top)}"
     print(f"  [OK] 因果路径={len(paths)}条, top置信度={top[0]['confidence']:.2f}")
 
-    # 清理
-    g.clear()
+    # 清理（仅删测试数据，不清空生产图谱）
+    g.clear_test_data(["利率上升", "BTC下跌", "市场恐慌", "成交量萎缩", "BTC波动加剧"])
     g.close()
 
 
@@ -108,9 +108,9 @@ def test_fusion_recaller():
     )
     print(f"  [OK] 融合结果={len(results)}条, 负样本加权={'YES' if has_negative_boosted else 'NO'}")
 
-    # 清理
+    # 清理（仅删测试数据，不清空生产图谱）
     store.collection.delete(ids=["t1", "t2"])
-    g.clear()
+    g.clear_test_data(["BTC价格", "成交量变化"])
     g.close()
 
 

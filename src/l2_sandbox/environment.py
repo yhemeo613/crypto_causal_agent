@@ -92,12 +92,15 @@ class EnvironmentRegistry:
         ec = self.env_configs[env_name]
         df = self._load_kline_data(interval, ec["date_range"][0], ec["date_range"][1])
 
+        # Regime：优先 config 显式标注，否则数据驱动分类（不再写死）
+        regime = ec.get("regime") or self.classify_regime(df) or self._infer_regime(env_name)
+
         env = Environment(
             name=env_name,
             description=ec.get("description", ""),
             date_start=ec["date_range"][0],
             date_end=ec["date_range"][1],
-            regime=self._infer_regime(env_name),
+            regime=regime,
             data=df,
         )
         self._current = env
@@ -137,35 +140,44 @@ class EnvironmentRegistry:
             return 0
         return len(env.data)
 
-    # ─── Regime 分类器（P1 会升级为自适应）───────────────────
+    # ─── Regime 分类器（数据驱动：趋势 R² + 年化波动率）────────
 
     def classify_regime(
-        self, df: pd.DataFrame, window: int = 50
+        self, df: pd.DataFrame, window: Optional[int] = None
     ) -> str:
         """
-        基于滚动窗口对数据自动分类 Regime。
+        基于数据自动分类 Regime（不再写死）：
+          - 强趋势（线性拟合 R²>0.5 且价格变化>15%）→ trend_up / trend_down
+          - 高波动（年化波动率 > 4.0）→ high_vol
+          - 其余 → range
 
         Returns:
-            "trend_up" | "trend_down" | "range" | "high_vol"
+            "trend_up" | "trend_down" | "range" | "high_vol" | "unknown"
         """
-        if df.empty or len(df) < window:
+        if df is None or df.empty or len(df) < 30:
             return "unknown"
 
-        recent = df.tail(window)
-        close = recent["close"]
-
-        # 价格变化
+        close = df["close"].astype(float)
+        n = len(close)
         pct_change = (close.iloc[-1] - close.iloc[0]) / close.iloc[0]
-        # 波动率（年化）
-        returns = close.pct_change().dropna()
-        vol = returns.std() * np.sqrt(365 * 24)  # 年化（小时K线）
 
-        if vol > 1.5:
-            return "high_vol"
-        elif abs(pct_change) > 0.20:
+        # 线性趋势拟合 R²（衡量价格是否呈单边趋势）
+        x = np.arange(n)
+        slope, intercept = np.polyfit(x, close, 1)
+        yhat = slope * x + intercept
+        ss_res = float(((close - yhat) ** 2).sum())
+        ss_tot = float(((close - close.mean()) ** 2).sum())
+        r2 = 1.0 - ss_res / (ss_tot + 1e-9)
+
+        # 年化波动率（小时 K 线）
+        returns = close.pct_change().dropna()
+        vol = float(returns.std() * np.sqrt(365 * 24)) if len(returns) > 2 else 0.0
+
+        if r2 > 0.5 and abs(pct_change) > 0.15:
             return "trend_up" if pct_change > 0 else "trend_down"
-        else:
-            return "range"
+        if vol > 4.0:
+            return "high_vol"
+        return "range"
 
     # ─── 内部 ──────────────────────────────────────────────
 

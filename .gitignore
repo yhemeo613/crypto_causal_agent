@@ -35,4 +35,4 @@ test_chroma.py
 dashboard/data/
 data/
 dashboard/data/
-.reasonix/
+.reasonix/.env

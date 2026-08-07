@@ -108,9 +108,9 @@ def test_decision_pipeline():
     assert dec["action"] in ("long", "short", "hold")
     assert 0 <= dec["confidence"] <= 1
 
-    # 清理
+    # 清理（仅删测试数据，不清空生产图谱）
     store.collection.delete(ids=["p4_t1", "p4_t2"])
-    g.clear()
+    g.clear_test_data(["利率平稳", "BTC上涨", "做多情绪"])
     g.close()
 
     print(f"\n  [OK] 全闭环决策完成: {dec['action']}")

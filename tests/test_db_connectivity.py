@@ -50,7 +50,10 @@ except Exception as e:
 # ─── 4. ChromaDB ────────────────────────────────────────
 try:
     import chromadb
-    client = chromadb.PersistentClient(path="./data/chromadb")
+    # settings 必须与 src/l5_memory/case_vector_store.py 一致，否则 SharedSystemClient 单例冲突
+    client = chromadb.PersistentClient(
+        path="./data/chromadb",
+        settings=chromadb.Settings(anonymized_telemetry=False))
     col_name = "test_conn"
     try:
         col = client.get_collection(col_name)

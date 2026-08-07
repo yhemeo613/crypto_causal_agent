@@ -41,7 +41,10 @@ class CaseVectorStore:
 
     def __init__(self, persist_path: str = "./data/chromadb"):
         import chromadb
-        self.client = chromadb.PersistentClient(path=persist_path)
+        self.client = chromadb.PersistentClient(
+            path=persist_path,
+            settings=chromadb.Settings(anonymized_telemetry=False),
+        )
         self._col = None
 
     @property
