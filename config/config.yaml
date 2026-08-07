@@ -1,0 +1,141 @@
+# crypto_causal_agent 主配置文件
+# 环境相关密钥通过 .env 文件或环境变量注入
+
+project:
+  name: crypto_causal_agent
+  version: 0.1.0
+  log_level: INFO
+  seed: 42
+
+# ─── LLM ────────────────────────────────
+llm:
+  provider: deepseek
+  model: deepseek-chat
+  api_key: ${DEEPSEEK_API_KEY}
+  api_base: https://api.deepseek.com
+  temperature: 0.0
+  max_tokens: 4096
+  timeout: 30
+  retry: 3
+
+# ─── 数据库 ─────────────────────────────
+database:
+  postgresql:
+    host: localhost
+    port: 5432
+    dbname: crypto_agent
+    user: postgres
+    password: ${PG_PASSWORD}
+    pool_size: 10
+  neo4j:
+    uri: bolt://localhost:7687
+    user: neo4j
+    password: ${NEO4J_PASSWORD}
+  chromadb:
+    path: ./data/chromadb
+    collection: case_memory
+  redis:
+    host: localhost
+    port: 6379
+    db: 0
+
+# ─── 数据采集 ───────────────────────────
+data:
+  # 网络代理（国内访问币安需要）
+  proxy: ${HTTPS_PROXY}                  # 如 http://127.0.0.1:7890，留空则不使用
+  binance:
+    # 交易所优先级（按顺序尝试，任一可用即可）
+    exchanges: [binance, okx, bybit]
+    symbols: [BTCUSDT]
+    kline_intervals: [1m, 5m, 15m, 1h, 4h, 1d]
+    start_date: "2024-01-01"
+    end_date: "2026-06-30"
+    data_dir: ./data/raw
+  glassnode:
+    api_key: ${GLASSNODE_API_KEY}
+    metrics: [sopr, mvrv, puell]
+  # CoinGecko 加密市场宏观（免费，无需 API Key）
+  coingecko:
+    history_days: 365
+  # FRED 传统宏观（免费注册，需要 API Key）
+  fred:
+    api_key: ${FRED_API_KEY}
+    series: [DFF, CPIAUCSL, UNRATE]
+
+# ─── 撮合仿真 ───────────────────────────
+matching:
+  initial_balance: 100000
+  commission: 0.0004
+  slippage_model: linear
+  slippage_base: 0.0001
+  funding_rate_interval_hours: 8
+
+# ─── 硬风控 ─────────────────────────────
+risk_control:
+  max_drawdown_pct: 0.30
+  max_position_pct: 0.95
+  max_leverage: 5
+  max_loss_per_trade_pct: 0.05
+  max_daily_trades: 20
+  min_confidence_threshold: 0.4
+
+# ─── 四环境沙箱 ─────────────────────────
+sandbox:
+  environments:
+    bull:
+      date_range: ["2024-01-01", "2024-03-31"]
+      description: "牛市环境"
+    bear:
+      date_range: ["2024-04-01", "2024-09-30"]
+      description: "熊市环境"
+    range:
+      date_range: ["2024-10-01", "2025-01-31"]
+      description: "震荡环境"
+    extreme:
+      date_range: ["2024-08-01", "2024-08-31"]
+      description: "极端波动环境"
+
+# ─── 感知 ───────────────────────────────
+perception:
+  time_slices:
+    l1:
+      window_days: 1
+      kline_interval: 5m
+    l2:
+      window_days: 14
+      kline_interval: 1h
+    l3:
+      window_days: 90
+      kline_interval: 1d
+  causal_extraction:
+    llm_provider: deepseek
+    statistical_methods: [granger]
+    min_confidence: 0.3
+
+# ─── 记忆 ───────────────────────────────
+memory:
+  instant_window_size: 10
+  vector_top_k: 5
+  causal_depth: 3
+  decay_factor: 0.95
+  negative_sample_weight: 2.0
+  auto_clean_interval_hours: 24
+
+# ─── 进化 ───────────────────────────────
+evolution:
+  population_size: 12
+  generations: 30
+  mutation_rate: 0.2
+  crossover_rate: 0.7
+  selection_method: tournament
+  tournament_size: 3
+  generalization_penalty_weight: 0.3
+  elitism_count: 2
+
+# ─── 实验 ───────────────────────────────
+experiment:
+  output_dir: ./experiments/outputs
+  save_trade_logs: true
+  save_decision_logs: true
+  save_llm_prompts: true
+  export_format: [csv, json, pickle]

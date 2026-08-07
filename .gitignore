@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+*.egg-info/
+
+# 数据（不提交，太大）
+data/raw/
+data/chromadb/
+
+# 实验输出
+experiments/outputs/
+
+# 日志
+logs/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Docker volumes
+pgdata/
+neo4jdata/
+tsdata/
+
+# Node
+dashboard/frontend/node_modules/
+dashboard/frontend/dist/
+
+# 不需要的缓存
+.cache/
+test_chroma.py
