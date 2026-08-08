@@ -71,7 +71,7 @@ class StatisticalCausalDiscovery:
 
             try:
                 gc_result = grangercausalitytests(
-                    data, maxlag=min(max_lag, len(data) // 10), verbose=False
+                    data, maxlag=min(max_lag, len(data) // 10)
                 )
             except Exception as e:
                 logger.debug(f"Granger test failed for {factor_name}: {e}")

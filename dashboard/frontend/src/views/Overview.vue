@@ -211,7 +211,7 @@ const dbChartCards = computed(() => {
       chart: { ...t, series: [{ type: 'pie', radius: ['52%', '78%'], center: ['50%', '58%'], label: { show: false },
         data: [{ value: d.neo4j?.triplets || 1, name: '因果边', itemStyle: { color: '#4fc3f7' } }, { value: Math.max((d.neo4j?.nodes || 0) - (d.neo4j?.triplets || 0), 1), name: '其他', itemStyle: { color: 'rgba(79,195,247,0.22)' } }] }] } },
     { icon: 'mdi:database-search-outline', name: 'ChromaDB', status: d.chromadb?.connected ? `${d.chromadb.cases} 案例` : '离线',
-      chart: { ...t, grid: { top: 10, bottom: 10, left: 10, right: 10 }, xAxis: { show: false, max: 100 }, yAxis: { show: false },
+      chart: { ...t, grid: { top: 10, bottom: 10, left: 10, right: 10 }, xAxis: { show: false, max: Math.max(300, d.chromadb?.cases || 0) }, yAxis: { show: false },
         series: [{ type: 'bar', data: [d.chromadb?.cases || 0], itemStyle: { color: '#69f0ae', borderRadius: 4 }, barWidth: 16,
           label: { show: true, position: 'right', fontSize: 16, color: '#fff', formatter: '{c}' } }] } },
   ]

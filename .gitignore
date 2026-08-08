@@ -36,3 +36,5 @@ dashboard/data/
 data/
 dashboard/data/
 .reasonix/.env
+tmp/
+.env

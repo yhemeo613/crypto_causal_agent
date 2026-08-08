@@ -29,9 +29,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# 将 src 加入路径
+# 将 src / dashboard 加入路径
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "dashboard"))
 load_dotenv(ROOT / ".env")
 
 # 禁用 chromadb 遥测（posthog 版本不兼容导致 ERRO 刷屏）
@@ -771,7 +772,8 @@ def run_decision_cycle(symbol: str = "BTCUSDT", cycle_id: Optional[int] = None) 
         except Exception as e:
             logger.warning(f"regime adapt skipped: {e}")
 
-        if kline and current_price > 0 and action in ("long", "short") and confidence >= risk_ctrl.min_confidence:
+        # 开仓条件：无持仓 + 明确方向 + 置信度达标（修复：已有持仓时不重复开仓）
+        if kline and current_price > 0 and not pos and action in ("long", "short") and confidence >= risk_ctrl.min_confidence:
             side = OrderSide.LONG if action == "long" else OrderSide.SHORT
             size_usd = sim_account.balance * float(dec_dict.get("position_size_pct", 0.2) or 0)
             size_units = size_usd / current_price  # USDT → 合约张数（币本位）
@@ -783,7 +785,9 @@ def run_decision_cycle(symbol: str = "BTCUSDT", cycle_id: Optional[int] = None) 
                 fill = matching.match_market(order, kline, current_price)
                 if fill.filled:
                     sim_account.open_position(symbol, side, fill.fill_size, fill.fill_price,
-                                              lev, fee=fill.fee, timestamp=ts)
+                                              lev, fee=fill.fee, timestamp=ts,
+                                              stop_loss=float(dec_dict.get("stop_loss") or 0),
+                                              take_profit=float(dec_dict.get("take_profit") or 0))
                     pg_execute(
                         "INSERT INTO trades (cycle_id, symbol, side, entry_price, size, leverage, entry_ts) "
                         "VALUES (%s,%s,%s,%s,%s,%s,%s)",
@@ -795,18 +799,40 @@ def run_decision_cycle(symbol: str = "BTCUSDT", cycle_id: Optional[int] = None) 
                 exec_note = f"风控拒绝: {risk.reject_reason}"
 
         elif kline and current_price > 0 and pos:
-            # 已有持仓：先检查爆仓，再处理反向/平仓信号
+            # 已有持仓：自动退出优先级 = 止损/止盈 → 爆仓 → 超时保护 → 决策信号
+            exit_price, exit_reason = None, None
+            if pos.stop_loss > 0 and (
+                (pos.side == OrderSide.LONG and current_price <= pos.stop_loss) or
+                (pos.side == OrderSide.SHORT and current_price >= pos.stop_loss)
+            ):
+                exit_price, exit_reason = pos.stop_loss, "stop_loss"
+            elif pos.take_profit > 0 and (
+                (pos.side == OrderSide.LONG and current_price >= pos.take_profit) or
+                (pos.side == OrderSide.SHORT and current_price <= pos.take_profit)
+            ):
+                exit_price, exit_reason = pos.take_profit, "take_profit"
+            elif pos.opened_at and (ts - pos.opened_at).total_seconds() > 30 * 60:
+                exit_price, exit_reason = current_price, "timeout"   # 持仓超 30 分钟保护性平仓
+            if exit_reason:
+                trade = sim_account.close_position(symbol, exit_price, 0.0,
+                                                   timestamp=ts, reason=exit_reason)
+                pg_execute(
+                    "UPDATE trades SET exit_price=%s, exit_ts=%s, pnl=%s WHERE symbol=%s AND exit_ts IS NULL",
+                    (trade.exit_price, ts, trade.pnl, symbol))
+                exec_note = f"自动平仓[{exit_reason}] @ {trade.exit_price:.1f} pnl={trade.pnl:.2f}"
+                logger.info(f"撮合平仓: {exec_note}")
+                pos = None
             liq = liquidation.check(sim_account.balance, pos.size, pos.entry_price,
-                                    pos.leverage, current_price, pos.side)
-            if liq.get("liquidated"):
-                trade = sim_account.close_position(symbol, liq["liquidation_price"], 0.0,
+                                      pos.leverage, current_price, pos.side) if pos else (False, 0.0)
+            if pos and liq[0]:
+                trade = sim_account.close_position(symbol, liq[1], 0.0,
                                                    timestamp=ts, reason="liquidation")
                 pg_execute(
                     "UPDATE trades SET exit_price=%s, exit_ts=%s, pnl=%s WHERE symbol=%s AND exit_ts IS NULL",
                     (trade.exit_price, ts, trade.pnl, symbol))
                 exec_note = f"爆仓强平 @ {trade.exit_price:.1f} pnl={trade.pnl:.2f}"
                 logger.warning(f"爆仓强平: {exec_note}")
-            elif action == "close" or (action in ("long", "short") and action != pos.side.value):
+            elif pos and (action == "close" or (action in ("long", "short") and action != pos.side.value)):
                 close_side = OrderSide.SHORT if pos.side == OrderSide.LONG else OrderSide.LONG
                 fill = matching.match_market(
                     OrderRequest(symbol=symbol, side=close_side, order_type=OrderType.MARKET,

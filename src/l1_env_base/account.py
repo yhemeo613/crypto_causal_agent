@@ -135,6 +135,8 @@ class Account:
         leverage: float,
         fee: float,
         timestamp: Optional[datetime] = None,
+        stop_loss: float = 0.0,
+        take_profit: float = 0.0,
     ) -> Position:
         """开仓：扣除保证金和手续费，创建持仓"""
         if symbol in self.positions:
@@ -161,6 +163,7 @@ class Account:
             entry_price=entry_price, leverage=leverage,
             margin=margin, liquidation_price=liq_price,
             opened_at=timestamp or datetime.now(timezone.utc),
+            stop_loss=stop_loss, take_profit=take_profit,
         )
         self.positions[symbol] = pos
         self._bump_daily_count(timestamp)
